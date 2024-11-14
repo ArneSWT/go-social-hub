@@ -1,11 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sync"
+
+	"github.com/google/uuid"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Contact struct {
@@ -16,22 +20,45 @@ type Contact struct {
 }
 
 var (
-	contacts  = make(map[string]Contact)
-	contactID = 1
-	// mutual exclusion, prevents concurrent access to a ressource
-	mu = sync.RWMutex{}
+	db *sql.DB
+	mu sync.RWMutex
 )
 
-// get all contacts
-func getContacts(w http.ResponseWriter, r *http.Request) {
-	// lock the read lock, so no goroutines can write to the map
-	mu.RLock()
-	// unlocks the read lock
-	defer mu.RUnlock()
+func initDB() {
+	var err error
+	db, err = sql.Open("sqlite3", "./contacts.db")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// create and fill a contact list
+	createTableSQL := `CREATE TABLE IF NOT EXISTS contacts (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "name" TEXT,
+        "email" TEXT,
+        "phone" TEXT
+    );`
+
+	_, err = db.Exec(createTableSQL)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func getContacts(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, name, email, phone FROM contacts")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
 	var contactList []Contact
-	for _, contact := range contacts {
+	for rows.Next() {
+		var contact Contact
+		if err := rows.Scan(&contact.ID, &contact.Name, &contact.Email, &contact.Phone); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		contactList = append(contactList, contact)
 	}
 
@@ -42,19 +69,23 @@ func getContacts(w http.ResponseWriter, r *http.Request) {
 
 func getContactById(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	mu.RLock()
-	defer mu.RUnlock()
+	row := db.QueryRow("SELECT id, name, email, phone FROM contacts WHERE id = ?", id)
 
-	if contact, exists := contacts[id]; exists {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(contact)
-	} else {
-		http.Error(w, "Contact not found", http.StatusNotFound)
+	var contact Contact
+	if err := row.Scan(&contact.ID, &contact.Name, &contact.Email, &contact.Phone); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Contact not found", http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(contact)
 }
 
-// Create a new contact
 func createContact(w http.ResponseWriter, r *http.Request) {
 	var newContact Contact
 	if err := json.NewDecoder(r.Body).Decode(&newContact); err != nil {
@@ -62,12 +93,13 @@ func createContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	newContact.ID = fmt.Sprintf("%d", contactID)
-	contacts[newContact.ID] = newContact
-	contactID++
+	newContact.ID = uuid.New().String()
+	_, err := db.Exec("INSERT INTO contacts (id, name, email, phone) VALUES (?, ?, ?, ?)",
+		newContact.ID, newContact.Name, newContact.Email, newContact.Phone)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -84,6 +116,9 @@ func main() {
 		POST /contact/create: Create a new contact.
 
 	*/
+
+	initDB()
+	defer db.Close()
 
 	http.HandleFunc("/contacts", getContacts)
 	http.HandleFunc("/contact", getContactById)
