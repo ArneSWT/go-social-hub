@@ -9,14 +9,14 @@ import (
 )
 
 type Contact struct {
-	ID string "json:id"
-	Name string "json:name"
-	Email string "json:email"
-	Phone string "json:phone"
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Phone string `json:"phone"`
 }
 
 var (
-	contacts = make(map[string]Contact)
+	contacts  = make(map[string]Contact)
 	contactID = 1
 	// mutual exclusion, prevents concurrent access to a ressource
 	mu = sync.RWMutex{}
@@ -77,12 +77,12 @@ func createContact(w http.ResponseWriter, r *http.Request) {
 func main() {
 
 	/*
-	CRUD operations:
+		CRUD operations:
 
-	GET /contacts: Fetch all contacts.
-	GET /contact?id=<id>: Fetch a single contact by its ID.
-	POST /contact/create: Create a new contact.
-	
+		GET /contacts: Fetch all contacts.
+		GET /contact?id=<id>: Fetch a single contact by its ID.
+		POST /contact/create: Create a new contact.
+
 	*/
 
 	http.HandleFunc("/contacts", getContacts)
