@@ -1,24 +1,26 @@
-FROM golang:1.20-alpine as builder
+# Use the official Golang image as the base image
+FROM golang:1.20
 
+# Install GCC
+RUN apt-get update && apt-get install -y gcc
+
+# Set the working directory inside the container
 WORKDIR /app
 
+# Copy the Go module files
 COPY go.mod go.sum ./
-RUN go mod tidy
 
+# Download the Go module dependencies
+RUN go mod download
+
+# Copy the rest of the application code
 COPY . .
 
-RUN go build -o main
+# Build the Go application
+RUN CGO_ENABLED=1 GOOS=linux go build -o main .
 
-
-
-FROM alpine:latest
-
-RUN apk --no-cache add ca-certificates
-
-WORKDIR /root/
-
-COPY --from=builder /app/main .
-
+# Expose the port the application runs on
 EXPOSE 8080
 
+# Run the Go application
 CMD ["./main"]
